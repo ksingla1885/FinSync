@@ -48,7 +48,7 @@ const Header = async () => {
 
           <SignedOut>
                 <SignInButton forceRedirectUrl='/dashboard'>
-                  <Button variant="outline"> LogIn </Button>
+                  <Button variant="outline" className="cursor-pointer"> LogIn </Button>
                 </SignInButton>
             </SignedOut>
 
