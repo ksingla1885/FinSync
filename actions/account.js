@@ -15,8 +15,6 @@ const serializeDecimal = (obj) => {
   return serialized;
 };
 
-
-
 export async function getAccountWithTransactions(accountId) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -49,8 +47,6 @@ export async function getAccountWithTransactions(accountId) {
     transactions: account.transactions.map(serializeDecimal),
   };
 }
-
-
 
 export async function bulkDeleteTransactions(transactionIds) {
   try {
@@ -114,7 +110,6 @@ export async function bulkDeleteTransactions(transactionIds) {
     return { success: false, error: error.message };
   }
 }
-
 
 export async function updateDefaultAccount(accountId) {
   try {
