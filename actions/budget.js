@@ -4,114 +4,7 @@ import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
-const serializeDecimal = (obj) => {
-  const serialized = { ...obj };
-  if (obj.balance) {
-    serialized.balance = obj.balance.toNumber();
-  }
-  if (obj.amount) {
-    serialized.amount = obj.amount.toNumber();
-  }
-  return serialized;
-};
-
-export async function getAccountWithTransactions(accountId) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-
-  const user = await db.user.findUnique({
-    where: { clerkUserId: userId },
-  });
-
-  if (!user) throw new Error("User not found");
-
-  const account = await db.account.findUnique({
-    where: {
-      id: accountId,
-      userId: user.id,
-    },
-    include: {
-      transactions: {
-        orderBy: { date: "desc" },
-      },
-      _count: {
-        select: { transactions: true },
-      },
-    },
-  });
-
-  if (!account) return null;
-
-  return {
-    ...serializeDecimal(account),
-    transactions: account.transactions.map(serializeDecimal),
-  };
-}
-
-export async function bulkDeleteTransactions(transactionIds) {
-  try {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) throw new Error("User not found");
-
-    // Get transactions to calculate balance changes
-    const transactions = await db.transaction.findMany({
-      where: {
-        id: { in: transactionIds },
-        userId: user.id,
-      },
-    });
-
-    // Group transactions by account to update balances
-    const accountBalanceChanges = transactions.reduce((acc, transaction) => {
-      const change =
-        transaction.type === "EXPENSE"
-          ? transaction.amount
-          : -transaction.amount;
-      acc[transaction.accountId] = (acc[transaction.accountId] || 0) + change;
-      return acc;
-    }, {});
-
-    // Delete transactions and update account balances in a transaction
-    await db.$transaction(async (tx) => {
-      // Delete transactions
-      await tx.transaction.deleteMany({
-        where: {
-          id: { in: transactionIds },
-          userId: user.id,
-        },
-      });
-
-      // Update account balances
-      for (const [accountId, balanceChange] of Object.entries(
-        accountBalanceChanges
-      )) {
-        await tx.account.update({
-          where: { id: accountId },
-          data: {
-            balance: {
-              increment: balanceChange,
-            },
-          },
-        });
-      }
-    });
-
-    revalidatePath("/dashboard");
-    revalidatePath("/account/[id]");
-
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-export async function updateDefaultAccount(accountId) {
+export async function getCurrentBudget(accountId) {
   try {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
@@ -124,27 +17,84 @@ export async function updateDefaultAccount(accountId) {
       throw new Error("User not found");
     }
 
-    // First, unset any existing default account
-    await db.account.updateMany({
+    const budget = await db.budget.findFirst({
       where: {
         userId: user.id,
-        isDefault: true,
       },
-      data: { isDefault: false },
     });
 
-    // Then set the new default account
-    const account = await db.account.update({
+    // Get current month's expenses
+    const currentDate = new Date();
+    const startOfMonth = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth(),
+      1
+    );
+    const endOfMonth = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() + 1,
+      0
+    );
+
+    const expenses = await db.transaction.aggregate({
       where: {
-        id: accountId,
+        userId: user.id,
+        type: "EXPENSE",
+        date: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+        accountId,
+      },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    return {
+      budget: budget ? { ...budget, amount: budget.amount.toNumber() } : null,
+      currentExpenses: expenses._sum.amount
+        ? expenses._sum.amount.toNumber()
+        : 0,
+    };
+  } catch (error) {
+    console.error("Error fetching budget:", error);
+    throw error;
+  }
+}
+
+export async function updateBudget(amount) {
+  try {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!user) throw new Error("User not found");
+
+    // Update or create budget
+    const budget = await db.budget.upsert({
+      where: {
         userId: user.id,
       },
-      data: { isDefault: true },
+      update: {
+        amount,
+      },
+      create: {
+        userId: user.id,
+        amount,
+      },
     });
 
     revalidatePath("/dashboard");
-    return { success: true, data: serializeTransaction(account) };
+    return {
+      success: true,
+      data: { ...budget, amount: budget.amount.toNumber() },
+    };
   } catch (error) {
+    console.error("Error updating budget:", error);
     return { success: false, error: error.message };
   }
 }

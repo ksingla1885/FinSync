@@ -35,7 +35,7 @@ import {
       },
     },
     budgetAlert: {
-      userName: "John Doe",
+      userName: "Ketan ",
       type: "budget-alert",
       data: {
         percentageUsed: 85,
@@ -47,7 +47,7 @@ import {
   
   export default function EmailTemplate({
     userName = "",
-    type = "monthly-report",
+    type = "budget-alert",
     data = {},
   }) {
     if (type === "monthly-report") {
